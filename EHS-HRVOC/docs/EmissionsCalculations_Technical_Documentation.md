@@ -2,7 +2,7 @@
 
 **Reference version:** `EmissionsCalculations_claude_v2.xlsm`
 **Owner:** ITC (Intercontinental Terminals Company) — HRVOC emissions reporting
-**Documented:** 2026-10-31
+**Documented:** 2026-10-31 · **Last updated:** 2026-11-02 (protection + roadmap)
 
 ---
 
@@ -341,6 +341,50 @@ Excel worksheet/workbook protection and the VBA project password are **deterrent
 encryption** — they prevent casual or accidental edits but are removable by a determined user.
 For a hard guarantee that the formulas cannot be changed or seen, move the calculations into
 SQL/SSRS, where the logic lives server-side and the workbook is no longer the source of truth.
+
+---
+
+## 11. Roadmap & recommendations
+
+### 11.1 Production SQL Server migration
+The source data (pushed by **UCOS**) is being migrated to a new **production SQL Server**.
+
+- **Workbook impact is a cell change, no code:** set `Settings!B3` (Server) to the new instance,
+  and `Settings!B4` (Database) if the name changes. All 24 queries follow automatically.
+- **Before cutover:** confirm the `Reports15min` tables are present on the new server and that
+  UCOS is writing there, then run a side-by-side validation (same day, old vs new server →
+  identical rows/totals) before switching the workbook over.
+
+### 11.2 SSRS / SQL migration (assessed)
+Longer term, these reports are a strong candidate for SQL Server Reporting Services:
+
+- **Good fit:** PDF rendering and **scheduled email delivery** via subscriptions — replaces the
+  manual `SavePDF` / `EmailPDF` / Outlook flow and the "Excel must be open on a desktop"
+  dependency. `SummaryGraph` is a standard multi-series line chart SSRS reproduces directly.
+- **Design decision:** an SSRS Excel export is a *report rendered into cells*, not the current
+  multi-tab working workbook — fine as a read/archive artifact, a compromise if people actively
+  manipulate it. Confirm how the `.xlsx` is actually used before committing.
+- **Groundwork done:** the Formulas sheet is already rebuilt as SQL reference tables plus a
+  verified temperature-band lookup (`sql/Formulas_ReferenceTables.sql`). The next proof-of-concept
+  is the per-minute calculation query for one stream (HRVOC→TOs), validated against the workbook.
+- **Edition note:** dynamic per-month folders, per-day filenames, and dynamic recipients need
+  SQL Server **Enterprise** (data-driven subscriptions).
+
+### 11.3 Formula ownership & change control
+The calculation formulas encode **regulatory methodology**, so ownership should sit with the
+functional / EHS subject-matter experts, not IT:
+
+- **Functional / EHS owns** the methodology — emission factors, curve-fit coefficients,
+  temperature bands, efficiencies — and reviews / approves any change.
+- **Technical / IT owns** the connection, data pipeline, automation, and protection, and
+  implements approved changes.
+- **Change control is now enforceable:** the worksheet / structure protection (§10) means edits
+  must route through the password holder — pair that with a documented request → SME review →
+  approval record.
+- **Open items needing SME sign-off:** the 105-01 / 105-02 discrepancies and the commented-out
+  105-1 / 105-2 queries (§8) — only the methodology owner can decide the intended behavior.
+- Reviewability improves markedly if the factors move to the SQL reference tables (§11.2), where
+  they are named and version-controlled rather than buried in locked cells.
 
 ---
 ## Appendix A — Cell formula reference (per calculation sheet)
