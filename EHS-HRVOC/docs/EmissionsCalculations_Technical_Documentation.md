@@ -262,7 +262,11 @@ Two caveats on the "feed the PDF" tier:
 
 These are noted for maintenance; none were changed as part of this documentation.
 
-1. **Server placeholder** — `Settings!B3` is still `SQL1`; set the real SQL Server name before a live run.
+1. **Server placeholder / production migration** — `Settings!B3` is still `SQL1`. The source data
+   (pushed by **UCOS**) is being migrated to a new **production SQL Server**; once the
+   `Reports15min` tables are in place there, point the workbook at it by setting `Settings!B3`
+   (Server) — and `Settings!B4` (Database) if the name changes. No code change is required; the
+   connection is built from those cells (see §3.1).
 2. **105-01 / 105-02 sheet labels** — the 105-01 and 105-02 calculation sheets carry header text that
    reads "105-03"; the formulas reference the correct `F105_01!` / `F105_02!` ranges, so it appears to be
    a copy-paste labeling artifact rather than a calc error — worth confirming.
@@ -290,6 +294,53 @@ These are noted for maintenance; none were changed as part of this documentation
 4. **`SleepVBA` modernized** to `Application.Wait` (no `kernel32` declare; 32/64-bit safe).
 5. Compiled p-code was purged so Excel recompiled cleanly from source on first open (confirmed — Excel
    re-saved this version with regenerated compiled caches).
+6. **Worksheet protection** added on the 11 formula sheets (macro-safe; see §10.1).
+7. **Workbook structure locked** so sheets can't be added/deleted/renamed/hidden (macro-safe; see §10.2).
+8. **VBA project password** — to be set manually with `Innovation2026` (see §10.3).
+
+---
+
+## 10. Protection
+
+The reference workbook is hardened against accidental edits. All protection uses the password
+`Innovation2026` and is **macro-safe** — the daily/monthly jobs still run.
+
+### 10.1 Worksheet protection (formula sheets)
+Eleven formula sheets are protected read-only so users cannot change the calculations: the seven
+flare/calc sheets (HRVOC to TOs, 50-2 to TOs, Natural Gas CO & NOx, 35-12, 105-01/02/03), the
+three Summary sheets, and the Formulas constants sheet.
+
+- Applied at open by `LockFormulaSheets` (in `ThisWorkbook.Workbook_Open`) with
+  `Protect Password:="Innovation2026", UserInterfaceOnly:=True`. `UserInterfaceOnly` lets the
+  macros keep writing while blocking the user; recalculation is unaffected.
+- The macros never write to these sheets (they write only to the landing sheets), so protection
+  does not interfere with the imports or the report export.
+- **Left editable:** Settings, DateSelection, Variables (inputs/config); Raw Data (`SaveXL` pastes
+  values onto its copy); and the raw landing sheets (macro-written).
+
+### 10.2 Workbook structure protection
+The workbook structure is locked (`Protect Structure:=True`) so sheets cannot be added, deleted,
+renamed, moved, or hidden/unhidden by the user.
+
+- There is **no** `UserInterfaceOnly` equivalent for workbook protection, so the routines that
+  change sheet structure bracket their operations with `BookUnlock` / `BookLock` (both in the
+  `Functions` module): `HideCalcs` (hides sheets) and the sheet-`.Copy` export in `SaveXL`,
+  `DailyJob`, and `MonthlyJob`. Structure is (re)locked on each open by `BookLock` in
+  `Workbook_Open`.
+
+### 10.3 VBA project password (manual step)
+The VBA project should be locked for viewing with the same password. This is **not** set in the
+delivered file — it is a one-time manual step (automating it means writing an unverifiable
+encrypted record into the macro binary, which risks corrupting the project):
+
+> Alt + F11 → Tools → VBAProject Properties → Protection → check **"Lock project for viewing"** →
+> enter `Innovation2026` twice → OK → Save.
+
+### 10.4 Caveat
+Excel worksheet/workbook protection and the VBA project password are **deterrents, not
+encryption** — they prevent casual or accidental edits but are removable by a determined user.
+For a hard guarantee that the formulas cannot be changed or seen, move the calculations into
+SQL/SSRS, where the logic lives server-side and the workbook is no longer the source of truth.
 
 ---
 ## Appendix A — Cell formula reference (per calculation sheet)
