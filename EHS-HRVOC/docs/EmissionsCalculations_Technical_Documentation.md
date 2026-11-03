@@ -1,8 +1,8 @@
 # Emissions Calculations Workbook — Technical Documentation
 
-**Reference version:** `EmissionsCalculations_claude_v2.xlsm`
+**Reference version:** `EmissionsCalculations.xlsm` (v2)
 **Owner:** ITC (Intercontinental Terminals Company) — HRVOC emissions reporting
-**Documented:** 2026-10-31 · **Last updated:** 2026-11-02 (protection + roadmap)
+**Documented:** 2026-10-31 · **Last updated:** 2026-11-03 (v2 modernization)
 
 ---
 
@@ -294,59 +294,16 @@ These are noted for maintenance; none were changed as part of this documentation
 4. **`SleepVBA` modernized** to `Application.Wait` (no `kernel32` declare; 32/64-bit safe).
 5. Compiled p-code was purged so Excel recompiled cleanly from source on first open (confirmed — Excel
    re-saved this version with regenerated compiled caches).
-6. **Worksheet protection** added on the 11 formula sheets (macro-safe; see §10.1).
-7. **Workbook structure locked** so sheets can't be added/deleted/renamed/hidden (macro-safe; see §10.2).
-8. **VBA project password** — to be set manually with `Innovation2026` (see §10.3).
+
+No worksheet, workbook-structure, or VBA-project protection is applied in this version — the workbook
+opens with macros enabled and no corruption prompt. Locking the formula sheets and the VBA project is
+available as a separate, optional step (see §10.3) but is deliberately **not** baked into the file.
 
 ---
 
-## 10. Protection
+## 10. Roadmap & recommendations
 
-The reference workbook is hardened against accidental edits. All protection uses the password
-`Innovation2026` and is **macro-safe** — the daily/monthly jobs still run.
-
-### 10.1 Worksheet protection (formula sheets)
-Eleven formula sheets are protected read-only so users cannot change the calculations: the seven
-flare/calc sheets (HRVOC to TOs, 50-2 to TOs, Natural Gas CO & NOx, 35-12, 105-01/02/03), the
-three Summary sheets, and the Formulas constants sheet.
-
-- Applied at open by `LockFormulaSheets` (in `ThisWorkbook.Workbook_Open`) with
-  `Protect Password:="Innovation2026", UserInterfaceOnly:=True`. `UserInterfaceOnly` lets the
-  macros keep writing while blocking the user; recalculation is unaffected.
-- The macros never write to these sheets (they write only to the landing sheets), so protection
-  does not interfere with the imports or the report export.
-- **Left editable:** Settings, DateSelection, Variables (inputs/config); Raw Data (`SaveXL` pastes
-  values onto its copy); and the raw landing sheets (macro-written).
-
-### 10.2 Workbook structure protection
-The workbook structure is locked (`Protect Structure:=True`) so sheets cannot be added, deleted,
-renamed, moved, or hidden/unhidden by the user.
-
-- There is **no** `UserInterfaceOnly` equivalent for workbook protection, so the routines that
-  change sheet structure bracket their operations with `BookUnlock` / `BookLock` (both in the
-  `Functions` module): `HideCalcs` (hides sheets) and the sheet-`.Copy` export in `SaveXL`,
-  `DailyJob`, and `MonthlyJob`. Structure is (re)locked on each open by `BookLock` in
-  `Workbook_Open`.
-
-### 10.3 VBA project password (manual step)
-The VBA project should be locked for viewing with the same password. This is **not** set in the
-delivered file — it is a one-time manual step (automating it means writing an unverifiable
-encrypted record into the macro binary, which risks corrupting the project):
-
-> Alt + F11 → Tools → VBAProject Properties → Protection → check **"Lock project for viewing"** →
-> enter `Innovation2026` twice → OK → Save.
-
-### 10.4 Caveat
-Excel worksheet/workbook protection and the VBA project password are **deterrents, not
-encryption** — they prevent casual or accidental edits but are removable by a determined user.
-For a hard guarantee that the formulas cannot be changed or seen, move the calculations into
-SQL/SSRS, where the logic lives server-side and the workbook is no longer the source of truth.
-
----
-
-## 11. Roadmap & recommendations
-
-### 11.1 Production SQL Server migration
+### 10.1 Production SQL Server migration
 The source data (pushed by **UCOS**) is being migrated to a new **production SQL Server**.
 
 - **Workbook impact is a cell change, no code:** set `Settings!B3` (Server) to the new instance,
@@ -355,7 +312,7 @@ The source data (pushed by **UCOS**) is being migrated to a new **production SQL
   UCOS is writing there, then run a side-by-side validation (same day, old vs new server →
   identical rows/totals) before switching the workbook over.
 
-### 11.2 SSRS / SQL migration (assessed)
+### 10.2 SSRS / SQL migration (assessed)
 Longer term, these reports are a strong candidate for SQL Server Reporting Services:
 
 - **Good fit:** PDF rendering and **scheduled email delivery** via subscriptions — replaces the
@@ -370,21 +327,23 @@ Longer term, these reports are a strong candidate for SQL Server Reporting Servi
 - **Edition note:** dynamic per-month folders, per-day filenames, and dynamic recipients need
   SQL Server **Enterprise** (data-driven subscriptions).
 
-### 11.3 Formula ownership & change control
+### 10.3 Formula ownership & change control
 The calculation formulas encode **regulatory methodology**, so ownership should sit with the
 functional / EHS subject-matter experts, not IT:
 
 - **Functional / EHS owns** the methodology — emission factors, curve-fit coefficients,
   temperature bands, efficiencies — and reviews / approves any change.
-- **Technical / IT owns** the connection, data pipeline, automation, and protection, and
-  implements approved changes.
-- **Change control is now enforceable:** the worksheet / structure protection (§10) means edits
-  must route through the password holder — pair that with a documented request → SME review →
-  approval record.
+- **Technical / IT owns** the connection, data pipeline, and automation, and implements approved
+  changes.
+- **To make change control enforceable (optional, not applied):** the formula sheets and the VBA
+  project can be locked by importing the native `modProtection.bas` module in Excel and setting a
+  VBA-project password manually — protection must **not** be applied by editing the macro binary,
+  which corrupts the project on open. Once locked, edits route through the password holder; pair
+  that with a documented request → SME review → approval record.
 - **Open items needing SME sign-off:** the 105-01 / 105-02 discrepancies and the commented-out
   105-1 / 105-2 queries (§8) — only the methodology owner can decide the intended behavior.
-- Reviewability improves markedly if the factors move to the SQL reference tables (§11.2), where
-  they are named and version-controlled rather than buried in locked cells.
+- Reviewability improves markedly if the factors move to the SQL reference tables (§10.2), where
+  they are named and version-controlled rather than buried in cells.
 
 ---
 ## Appendix A — Cell formula reference (per calculation sheet)
