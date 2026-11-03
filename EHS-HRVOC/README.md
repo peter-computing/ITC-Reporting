@@ -8,8 +8,7 @@ and the SQL/SSRS migration groundwork.
 
 | Path | What it is |
 |------|------------|
-| `workbooks/EmissionsCalculations_claude_v2_protected.xlsm` | Current workbook — DSN-less ODBC connection via the **Settings** sheet, 64-bit-safe VBA, and worksheet protection on the formula/calc sheets (password-protected; see docs). |
-| `workbooks/EmissionsCalculations_claude_v2_REFERENCE.xlsm` | Reference snapshot of v2 (pre-protection) used as the baseline for the documentation. |
+| `workbooks/EmissionsCalculations.xlsm` | Current workbook (v2) — DSN-less ODBC connection via the **Settings** sheet and 64-bit-safe VBA (`Application.Wait` in place of the old Sleep API). Opens cleanly with no macro-corruption prompt. Protection is applied separately via native VBA import (`modProtection.bas`), not baked into this file. |
 | `docs/EmissionsCalculations_Technical_Documentation.md` | Full technical documentation — architecture, data flow, SQL source, calculation methodology, VBA module reference, the worksheet-role/PDF analysis, and a per-sheet cell-formula appendix. |
 | `sql/Formulas_ReferenceTables.sql` | The Excel **Formulas** sheet rebuilt as SQL Server reference tables (compound constants, MW curve-fit coefficients, TO-A/TO-B temperature-band emission factors, flare-tip data) plus a verified banded-factor lookup function — for the SSRS/SQL port. |
 | `slides/EmissionsCalculations_Functional_Changes.pptx` | Summary deck of the v1 → v2 functional changes. |
@@ -19,7 +18,10 @@ and the SQL/SSRS migration groundwork.
 - The database connection is configured in the workbook's **Settings** sheet
   (Server, Database, Authentication, ODBC Driver). The `Server` value is a
   placeholder (`SQL1`) — set the real instance before a production run.
-- Worksheet protection and the VBA project password use the password documented
-  with the delivery. Both are deterrents, not encryption.
+- The current workbook ships without protection. To lock the formula/calc
+  sheets and the VBA project, import `modProtection.bas` natively in Excel and
+  set the VBA project password manually (see the technical documentation).
+  Protection must not be applied by editing the macro binary — doing so
+  corrupts the VBA project on open.
 - No emission calculations were changed in the modernization; see the technical
   documentation for the full before/after.
