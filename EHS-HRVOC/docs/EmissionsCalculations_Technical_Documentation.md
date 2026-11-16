@@ -2,7 +2,7 @@
 
 **Reference version:** `EmissionsCalculations.xlsm` (v2)
 **Owner:** ITC (Intercontinental Terminals Company) — HRVOC emissions reporting
-**Documented:** 2026-10-31 · **Last updated:** 2026-11-03 (v2 modernization)
+**Documented:** 2026-10-31 · **Last updated:** 2026-11-16 (added §3.3 data-source inventory)
 
 ---
 
@@ -101,6 +101,46 @@ Legend: **MOL_WT** = molecular weight from the flare-gas meter; **SCFM** = volum
 **CTRL_TEMP** = thermal-oxidizer temperature; **MOV_*** = routing-valve positions used to split
 flow between TO-A / TO-B / flare; **PCV_GAS_PCT** / **SCFM_GAS** = natural-gas valve % open and flow;
 **PILOT_* / TOTAL_PILOTS** = flare pilot flows.
+
+### 3.3 Current database & table sources
+
+A consolidated inventory of the live data source, as the workbook is configured today.
+
+| | Value | Where set |
+|---|---|---|
+| **Server** | `SQL1` *(placeholder)* | `Settings!B3` |
+| **Database** | `Reports15min` | `Settings!B4` |
+| **Schema** | `dbo` | — (fully-qualified in `MonthlyJob`: `[Reports15min].[dbo].[<table>]`) |
+| **Driver** | `ODBC Driver 17 for SQL Server` | `Settings!B6` |
+| **Authentication** | `Integrated` (or `SQL`) | `Settings!B5` |
+| **Connection** | DSN-less ODBC via `DBConnection()` | built at run time (see §3.1) |
+
+**Source system:** the `Reports15min` tables are populated by **UCOS**, which pushes the per-minute
+process data onto the SQL Server. The workbook only *reads* these tables — it never writes to the
+database.
+
+**Migration status:** the SQL Server has been migrated to a new **production SQL Server**. The
+`Reports15min` source data still needs to be migrated there and the workbook repointed by setting
+`Settings!B3` (Server) — and `Settings!B4` (Database) if the name changes. No code change is
+required; all 24 queries build their connection from these cells. See §10.1 for the cutover steps.
+
+**Source tables** (database `Reports15min`, schema `dbo`) — one row per minute, per source:
+
+| Table | Emission source | In daily path? | Lands on |
+|---|---|---|---|
+| `TO_A` | Thermal oxidizer A (HRVOC + 50-2 streams, control temp, gas valve, routing MOVs) | Yes | TO_A_CSI |
+| `TO_B` | Thermal oxidizer B (HRVOC + 50-2 streams, control temp, routing MOVs) | Yes | TO_B_CSI |
+| `HRVOC_FLARE` | HRVOC flare (MW, flow, pilots, inlet MOV) | Yes | HRVOC_FLARE_CSI |
+| `F050_02` | 50-2 flare | Yes | F050_02_CSI |
+| `F035_12` | 35-12 flare | Yes | F035_12_CSI |
+| `F105_01` | 105-01 flare | **No** — query commented out | F105_01 |
+| `F105_02` | 105-02 flare | **No** — query commented out | F105_02 |
+| `F105_03` | 105-03 flare | Yes | F105_03 |
+
+Every table is queried for a **single calendar day** with
+`WHERE CONVERT(CHAR(10), TimeStamp, 120) = '<StartDate>'  ORDER BY TimeStamp` (see §3.2 for the
+per-table column lists). `DailyJob` runs 8 queries; `DailyImport` runs 6; of the three 105-x
+tables only `F105_03` is active in the daily run (`F105_01` / `F105_02` are commented out — see §8).
 
 ---
 
