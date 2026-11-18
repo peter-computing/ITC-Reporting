@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Dashboards</title>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface-0: #f3f3f1;
+    --surface-1: #fcfcfb;
+    --border: #e2e1dc;
+    --grid: #ecebe7;
+    --hover: #f1f0ec;
+    --selected: #e3eefc;
+    --selected-edge: #2a78d6;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #77766f;
+    --series-1: #2a78d6;
+    --track: #ecebe7;
+    --flash: #cde2fb;
+    --good: #0ca30c; --warning: #fab219; --critical: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --surface-0: #121211; --surface-1: #1a1a19; --border: #2d2d2b; --grid: #262624;
+      --hover: #222220; --selected: #172b45; --selected-edge: #3987e5;
+      --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+      --series-1: #3987e5; --track: #2d2d2b; --flash: #104281;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --surface-0: #121211; --surface-1: #1a1a19; --border: #2d2d2b; --grid: #262624;
+    --hover: #222220; --selected: #172b45; --selected-edge: #3987e5;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --series-1: #3987e5; --track: #2d2d2b; --flash: #104281;
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }   /* author display rules must not override the hidden attribute */
+  body { margin: 0; }
+  .viz-root {
+    height: 100vh; display: flex; flex-direction: column; gap: 14px;
+    background: var(--surface-0); color: var(--text-primary);
+    font: 14px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif;
+    padding: 20px clamp(16px, 3vw, 32px);
+  }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0; }
+  .meta { color: var(--text-secondary); font-size: 13px; display: flex; gap: 16px; align-items: center; }
+  .live { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text-primary); }
+  .fresh { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+  .fresh time { color: var(--text-primary); font-weight: 600; }
+  .fresh .muted { color: var(--text-muted); }
+  .fresh-icon { display: none; width: 16px; height: 16px; border-radius: 50%; font-size: 10px; font-weight: 700; place-items: center; }
+  .fresh[data-state="stale"] .fresh-icon { display: inline-grid; background: var(--warning); color: #0b0b0b; }
+  .fresh[data-state="stale"] .fresh-icon::before { content: "!"; }
+  .fresh[data-state="error"] .fresh-icon { display: inline-grid; background: var(--critical); color: #fff; }
+  .fresh[data-state="error"] .fresh-icon::before { content: "✕"; }
+  .fresh[data-state="error"] { color: var(--text-primary); }
+  .live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+  .live[data-state="live"] .dot { background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 25%, transparent); }
+  .live[data-state="polling"] .dot { background: var(--warning); }
+  .live[data-state="offline"] .dot { background: var(--critical); }
+
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; }
+
+  /* KPI strip */
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+  .kpi { padding: 10px 14px; }
+  .kpi .label { color: var(--text-secondary); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+  .kpi .value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  .status-icon { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; font-size: 10px; font-weight: 700; color: #fff; flex: none; }
+  .status-icon.outline { background: transparent; border: 2px solid var(--text-muted); color: var(--text-secondary); }
+  .status { display: inline-flex; align-items: center; gap: 6px; }
+
+  /* master / detail */
+  .workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 14px; }
+  @media (max-width: 960px) {
+    .viz-root { height: auto; min-height: 100vh; }
+    .workspace { grid-template-columns: 1fr; }
+    .grid-wrap { max-height: 60vh; }
+  }
+
+  .master { display: flex; flex-direction: column; min-height: 0; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .toolbar .count { color: var(--text-secondary); font-size: 13px; }
+  .toolbar .count .limit { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600;
+                           color: var(--text-primary); background: color-mix(in srgb, var(--warning) 28%, transparent); cursor: help; }
+  input[type=search] { background: var(--surface-0); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font: inherit; width: 220px; }
+
+  .grid-wrap { flex: 1; min-height: 0; overflow: auto; outline: none; }
+  .grid-wrap:focus-visible { box-shadow: inset 0 0 0 2px var(--selected-edge); border-radius: 0 0 10px 10px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  th { position: sticky; top: 0; z-index: 1; background: var(--surface-1); color: var(--text-secondary); font-weight: 600; font-size: 12px; cursor: pointer; user-select: none; box-shadow: 0 1px 0 var(--border); }
+  th[aria-sort="ascending"]::after { content: " ▲"; font-size: 9px; }
+  th[aria-sort="descending"]::after { content: " ▼"; font-size: 9px; }
+  td.num, th.num { text-align: right; }
+  td.muted { color: var(--text-secondary); }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover td { background: var(--hover); }
+  tbody tr[aria-selected="true"] td { background: var(--selected); }
+  tbody tr[aria-selected="true"] td:first-child { box-shadow: inset 3px 0 0 var(--selected-edge); }
+  tr.flash td { animation: flash 2.2s ease-out; }
+  @keyframes flash { from { background: var(--flash); } }
+  .empty, .error { color: var(--text-secondary); padding: 28px; text-align: center; cursor: default; }
+  .error { color: var(--critical); }
+
+  /* detail pane */
+  .detail { position: relative; overflow: auto; padding: 18px 20px; outline: none; }
+  .detail-body.flash { animation: flash 2.2s ease-out; }
+  .detail-close {
+    position: sticky; top: 0; float: right; margin: -8px -10px 0 8px; z-index: 1;
+    width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 6px;
+    background: transparent; color: var(--text-secondary); font-size: 20px; line-height: 1; cursor: pointer;
+  }
+  .detail-close:hover { background: var(--hover); color: var(--text-primary); }
+  .detail-close:focus-visible, .tool-btn:focus-visible { outline: 2px solid var(--selected-edge); outline-offset: 1px; }
+
+  /* detail pane closed: the grid takes the full width */
+  .workspace.no-detail { grid-template-columns: minmax(0, 1fr); }
+  .workspace.no-detail .detail { display: none; }
+
+  .tool-group { display: flex; align-items: center; gap: 8px; }
+  .tool-btn {
+    display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface-0); color: var(--text-secondary); font: inherit; font-size: 13px; font-weight: 600;
+  }
+  .tool-btn:hover { color: var(--text-primary); }
+  .tool-btn[aria-pressed="true"] { color: var(--text-primary); background: var(--selected); border-color: color-mix(in srgb, var(--selected-edge) 45%, var(--border)); }
+  .tool-btn svg { width: 16px; height: 16px; }
+  .detail .placeholder { color: var(--text-secondary); text-align: center; margin-top: 40%; }
+  .detail .eyebrow { color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  .detail h2 { font-size: 20px; font-weight: 600; margin: 2px 0 8px; line-height: 1.25; overflow-wrap: anywhere; }
+  .detail .notice { background: color-mix(in srgb, var(--critical) 12%, transparent); color: var(--text-primary); border-left: 3px solid var(--critical); padding: 8px 10px; border-radius: 4px; margin: 10px 0; font-size: 13px; }
+  .detail .hero { font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums; margin: 14px 0 2px; }
+  .detail .hero-label { color: var(--text-secondary); font-size: 13px; }
+  .detail section { border-top: 1px solid var(--grid); margin-top: 16px; padding-top: 14px; }
+  .detail h3 { font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .04em; margin: 0 0 10px; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 0; }
+  dt { color: var(--text-secondary); }
+  dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  dd .sub { color: var(--text-muted); font-size: 12px; display: block; }
+  dt.wide, dd.wide { grid-column: 1 / -1; }
+  dd.wide { white-space: pre-wrap; background: var(--surface-0); border-radius: 6px; padding: 8px 10px; margin-top: -4px; }
+  dd.null { color: var(--text-muted); }
+  .detail > .status { margin-bottom: 4px; }
+
+  /* layout: vertical tabs on the left, dashboard on the right */
+  .body { flex: 1; min-height: 0; display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 14px; }
+  .body:has(> .sidebar[hidden]) { grid-template-columns: minmax(0, 1fr); }   /* single tab: no sidebar */
+  .sidebar { display: flex; flex-direction: column; min-height: 0; }
+
+  /* tabs (vertical) */
+  .tabs { display: flex; flex-direction: column; gap: 2px; padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
+  .tabs .tabs-label { color: var(--text-muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; padding: 6px 10px 8px; }
+  .tabs button {
+    position: relative; width: 100%; background: none; border: 0; border-radius: 6px;
+    padding: 9px 10px 9px 13px; font: inherit; font-weight: 600; color: var(--text-secondary); cursor: pointer;
+    display: flex; align-items: center; gap: 8px; text-align: left; line-height: 1.3; overflow-wrap: anywhere;
+  }
+  .tabs button:hover { color: var(--text-primary); background: var(--hover); }
+  .tabs button[aria-selected="true"] { color: var(--text-primary); background: var(--selected); }
+  .tabs button[aria-selected="true"]::before {
+    content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 3px; border-radius: 0 3px 3px 0; background: var(--selected-edge);
+  }
+  .tabs button:focus-visible { outline: 2px solid var(--selected-edge); outline-offset: -2px; }
+  .tab-dot { flex: none; margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: var(--series-1); }
+
+  /* auto-rotation control (bottom of the sidebar) */
+  .rotate { border-top: 1px solid var(--border); padding: 10px 12px 12px; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; }
+  .rot-btn {
+    grid-row: span 2; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface-0); color: var(--text-primary);
+  }
+  .rot-btn:hover { background: var(--hover); }
+  .rot-btn:focus-visible { outline: 2px solid var(--selected-edge); outline-offset: 1px; }
+  .rot-btn svg { width: 12px; height: 12px; }
+  .rot-label { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+  .rot-sub { font-size: 12px; color: var(--text-secondary); line-height: 1.3; min-height: 1.3em; font-variant-numeric: tabular-nums; }
+  .rot-bar { grid-column: 1 / -1; height: 3px; border-radius: 2px; background: var(--track); overflow: hidden; margin-top: 6px; }
+  .rot-bar > div { height: 100%; width: 0; background: var(--series-1); border-radius: 0 2px 2px 0; }
+  .rotate[data-state="paused"] .rot-bar > div, .rotate[data-state="waiting"] .rot-bar > div { background: var(--text-muted); }
+
+  /* narrow screens: tabs become a horizontal strip above the dashboard */
+  @media (max-width: 760px) {
+    .body { grid-template-columns: minmax(0, 1fr); }
+    .sidebar { flex-direction: row; align-items: center; }
+    .tabs { flex: 1; }
+    .rotate { border-top: 0; border-left: 1px solid var(--border); padding: 6px 10px; grid-template-columns: auto; }
+    .rotate .rot-label, .rotate .rot-sub, .rotate .rot-bar { display: none; }
+    .tabs { flex-direction: row; overflow-x: auto; padding: 4px; }
+    .tabs .tabs-label { display: none; }
+    .tabs button { width: auto; white-space: nowrap; }
+    .tabs button[aria-selected="true"]::before { left: 8px; right: 8px; top: auto; bottom: 0; width: auto; height: 3px; border-radius: 3px 3px 0 0; }
+  }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .panel { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 14px; }
+  .meter { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; margin: 8px 0 6px; }
+  .meter > div { height: 100%; background: var(--series-1); border-radius: 0 4px 4px 0; transition: width .4s ease; }
+  .meter-caption { color: var(--text-secondary); font-size: 13px; }
+  .muted-note { color: var(--text-muted); font-size: 12px; margin-top: 6px; }
+  .siblings { list-style: none; margin: 0; padding: 0; }
+  .siblings li { display: flex; justify-content: space-between; gap: 10px; padding: 7px 8px; margin: 0 -8px; border-radius: 6px; cursor: pointer; }
+  .siblings li:hover { background: var(--hover); }
+  .siblings li .num { font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <header>
+    <h1 id="title">Live Dashboards</h1>
+    <div class="meta">
+      <span class="fresh" id="fresh" data-state="none" aria-live="polite"><span class="fresh-icon" aria-hidden="true"></span><span id="freshText">—</span></span>
+      <span class="live" id="live" data-state="connecting"><span class="dot"></span><span id="liveText">Connecting…</span></span>
+    </div>
+  </header>
+
+  <div class="body">
+  <aside class="card sidebar" id="sidebar">
+    <nav class="tabs" id="tabs" role="tablist" aria-label="Dashboards" aria-orientation="vertical"></nav>
+    <div class="rotate" id="rotate" data-state="off" hidden>
+      <button type="button" class="rot-btn" id="rotToggle" aria-pressed="true" aria-label="Pause auto-rotate" title="Pause auto-rotate">
+        <svg viewBox="0 0 12 12" aria-hidden="true" id="rotIcon"></svg>
+      </button>
+      <div class="rot-label">Auto-rotate</div>
+      <div class="rot-sub" id="rotSub" aria-live="off"></div>
+      <div class="rot-bar" aria-hidden="true"><div id="rotFill"></div></div>
+    </div>
+  </aside>
+
+  <div class="panel" id="panel" role="tabpanel">
+    <section class="kpis" id="kpis"></section>
+
+    <section class="workspace">
+      <div class="card master">
+        <div class="toolbar">
+          <span class="count" id="count"></span>
+          <div class="tool-group">
+            <input type="search" id="search" placeholder="Filter…" aria-label="Filter rows">
+            <button type="button" class="tool-btn" id="toggleDetail" aria-pressed="true" aria-controls="detailPane"
+                    title="Show or hide the detail pane (Enter on a row opens it)">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5"/><path d="M10 2.75v10.5"/>
+              </svg>
+              Details
+            </button>
+          </div>
+        </div>
+        <div class="grid-wrap" id="gridWrap" tabindex="0" role="grid" aria-label="Rows" aria-multiselectable="false">
+          <table>
+            <thead><tr id="head"></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <aside class="card detail" id="detailPane" aria-label="Row details" tabindex="-1">
+        <button type="button" class="detail-close" id="closeDetail" aria-label="Close details" title="Close details">×</button>
+        <div class="detail-body" id="detail" aria-live="polite"></div>
+      </aside>
+    </section>
+  </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

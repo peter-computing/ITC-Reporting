@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>LiveDashboardMultiTab</RootNamespace>
+    <AssemblyName>LiveDashboardMultiTab</AssemblyName>
+
+    <!-- IIS: run inside the IIS worker process (fastest option for ASP.NET Core on IIS). -->
+    <AspNetCoreHostingModel>InProcess</AspNetCoreHostingModel>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
+  </ItemGroup>
+
+  <!-- Keep repo-only folders out of the published site. -->
+  <ItemGroup>
+    <Content Remove="deploy\**;db\**;out\**" />
+    <None Remove="deploy\**;db\**;out\**" />
+    <Compile Remove="out\**" />
+  </ItemGroup>
+
+</Project>

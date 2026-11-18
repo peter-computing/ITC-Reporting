@@ -1,0 +1,12 @@
+# Build and publish output
+bin/
+obj/
+out/
+logs/
+
+# Local settings / IDE
+*.user
+.vs/
+.vscode/
+appsettings.Development.json
+appsettings.Local.json
