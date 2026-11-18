@@ -355,7 +355,7 @@ public sealed class ChangeWatcher(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var configSub = options.OnChange(_ =>
+        using var configSub = options.OnChange(changed =>
         {
             log.LogInformation("Dashboard configuration changed; notifying browsers");
             _tokens.Clear();    // queries may have changed – start fresh
