@@ -207,27 +207,29 @@ if (-not (Get-ChildItem $runtimes -Directory -Filter "8.*" -ErrorAction Silently
 }
 Write-Ok "ASP.NET Core 8 Hosting Bundle is installed"
 
-# Optional IIS features. Server SKUs use Windows *features*; client Windows uses optional features.
-$isServer = (Get-CimInstance Win32_OperatingSystem).ProductType -ne 1
-function Test-IisFeature([string]$serverName, [string]$clientName) {
-    if ($isServer) { $f = Get-WindowsFeature $serverName -ErrorAction SilentlyContinue; return [bool]($f -and $f.Installed) }
-    $f = Get-WindowsOptionalFeature -Online -FeatureName $clientName -ErrorAction SilentlyContinue
-    return [bool]($f -and $f.State -eq "Enabled")
+# Optional IIS features. Checked by asking IIS which modules it has registered: instant, and
+# doesn't depend on Windows servicing (Get-WindowsFeature can sit at "Collecting data..." for
+# minutes while servicing is busy or a restart is pending). Windows features are only touched
+# when something is missing AND -InstallMissingFeatures was given.
+Import-Module WebAdministration
+function Test-IisFeature([string]$module) {
+    return [bool](Get-WebGlobalModule -Name $module -ErrorAction SilentlyContinue)
 }
 function Install-IisFeature([string]$serverName, [string]$clientName) {
+    $isServer = (Get-CimInstance Win32_OperatingSystem).ProductType -ne 1
     if ($isServer) { Install-WindowsFeature $serverName | Out-Null }
     else { Enable-WindowsOptionalFeature -Online -FeatureName $clientName -All -NoRestart | Out-Null }
 }
 
 $useWindowsAuth = $WindowsAuth -or ($AllowGroups.Count -gt 0)
-$features = @(@{ Server = "Web-WebSockets"; Client = "IIS-WebSockets"; Label = "WebSocket Protocol"; Required = $false })
-if ($useWindowsAuth)          { $features += @{ Server = "Web-Windows-Auth"; Client = "IIS-WindowsAuthentication"; Label = "Windows Authentication"; Required = $true } }
-if ($AllowGroups.Count -gt 0) { $features += @{ Server = "Web-Url-Auth";     Client = "IIS-URLAuthorization";      Label = "URL Authorization";      Required = $true } }
+$features = @(@{ Module = "WebSocketModule"; Server = "Web-WebSockets"; Client = "IIS-WebSockets"; Label = "WebSocket Protocol"; Required = $false })
+if ($useWindowsAuth)          { $features += @{ Module = "WindowsAuthenticationModule"; Server = "Web-Windows-Auth"; Client = "IIS-WindowsAuthentication"; Label = "Windows Authentication"; Required = $true } }
+if ($AllowGroups.Count -gt 0) { $features += @{ Module = "UrlAuthorizationModule";      Server = "Web-Url-Auth";     Client = "IIS-URLAuthorization";      Label = "URL Authorization";      Required = $true } }
 
 foreach ($f in $features) {
-    if (Test-IisFeature $f.Server $f.Client) { Write-Ok "$($f.Label) is installed"; continue }
+    if (Test-IisFeature $f.Module) { Write-Ok "$($f.Label) is installed"; continue }
     if ($InstallMissingFeatures) {
-        Write-Step "Installing the IIS $($f.Label) feature"
+        Write-Step "Installing the IIS $($f.Label) feature (this can take a few minutes)"
         Install-IisFeature $f.Server $f.Client
         Write-Ok "$($f.Label) installed"
     } elseif ($f.Required) {
