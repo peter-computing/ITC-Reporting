@@ -17,6 +17,18 @@
       - ASP.NET Core 8 Hosting Bundle
         https://dotnet.microsoft.com/download/dotnet/8.0  (Hosting Bundle under "ASP.NET Core Runtime")
 
+.PARAMETER Name
+    One name for this installation. Sets, unless you pass them separately:
+      -AppPath      lower-case Name          http://server/<name>/
+      -AppPoolName  Name                     app pool "<Name>" (SQL login: IIS APPPOOL\<Name>)
+      -InstallPath  C:\inetpub\<Name>
+      -SiteName     Name (only with -NewSite)
+    Letters, digits, '-', '_' and '.' only. Use a different -Name for each
+    installation to run several side by side, each with its own settings.
+    Without -Name, the defaults are /dashboards, "LiveDashboards" and
+    C:\inetpub\LiveDashboards (as in earlier versions).
+    To update an installation, run the script again with the same -Name.
+
 .PARAMETER SiteName
     Existing IIS site to add the app under (default "Default Web Site").
     With -NewSite, the name of the site to create.
@@ -64,6 +76,14 @@
     .\Install-IIS.ps1
 
 .EXAMPLE
+    # Named installation: http://server/opsdashboards/, app pool "OpsDashboards", C:\inetpub\OpsDashboards
+    .\Install-IIS.ps1 -Name OpsDashboards
+
+.EXAMPLE
+    # Named installation as its own site on port 8081
+    .\Install-IIS.ps1 -Name FinanceDashboards -NewSite -Port 8081
+
+.EXAMPLE
     # Dedicated site on port 8080
     .\Install-IIS.ps1 -NewSite -SiteName "LiveDashboards" -Port 8080
 
@@ -77,6 +97,7 @@
 #>
 [CmdletBinding()]
 param(
+    [string] $Name = "",
     [string] $SiteName = "Default Web Site",
     [string] $AppPath = "dashboards",
     [switch] $NewSite,
@@ -93,10 +114,22 @@ param(
 
 $ErrorActionPreference = "Stop"
 $SourcePath = Join-Path $PSScriptRoot "site"
+
+# -Name fills in every name that wasn't given explicitly.
+if ($Name) {
+    $Name = $Name.Trim()
+    if ($Name -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') {
+        throw "-Name '$Name' isn't valid. Use 1-64 letters, digits, '-', '_' or '.', starting with a letter or digit (no spaces)."
+    }
+    if (-not $PSBoundParameters.ContainsKey("AppPath"))     { $AppPath = $Name.ToLowerInvariant() }
+    if (-not $PSBoundParameters.ContainsKey("AppPoolName")) { $AppPoolName = $Name }
+    if (-not $PSBoundParameters.ContainsKey("InstallPath")) { $InstallPath = Join-Path "C:\inetpub" $Name }
+    if ($NewSite -and -not $PSBoundParameters.ContainsKey("SiteName")) { $SiteName = $Name }
+}
 $AppPath = $AppPath.Trim("/")
 
 # Guard rails: never repoint the server's default site, never install a sub-app with no path.
-if ($NewSite -and -not $PSBoundParameters.ContainsKey("SiteName")) { $SiteName = "LiveDashboards" }
+if ($NewSite -and -not $PSBoundParameters.ContainsKey("SiteName") -and -not $Name) { $SiteName = "LiveDashboards" }
 if ($NewSite -and $SiteName -eq "Default Web Site") {
     throw "-NewSite would take over 'Default Web Site'. Pass a different -SiteName, or drop -NewSite to install under it as /$AppPath."
 }
@@ -108,12 +141,36 @@ function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)   { Write-Host "    $msg" -ForegroundColor Green }
 function Write-Warn2($msg){ Write-Host "    $msg" -ForegroundColor Yellow }
 
+Write-Host ""
+Write-Host "Installation" -ForegroundColor Cyan
+if ($NewSite) { Write-Host "  Site:         $SiteName (new site, port $Port$(if ($HostHeader) { ", host $HostHeader" }))" }
+else          { Write-Host "  Address:      /$AppPath/ under '$SiteName'" }
+Write-Host "  App pool:     $AppPoolName"
+Write-Host "  Folder:       $InstallPath"
+Write-Host ""
+
 # ---------------------------------------------------------------- checks
 Write-Step "Checking prerequisites"
 
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw "Run this script from an elevated PowerShell (Run as Administrator)."
+}
+
+# 32-bit PowerShell sees the wrong Program Files folder and a partial view of IIS.
+if (-not [Environment]::Is64BitProcess) {
+    throw "This is 32-bit PowerShell ('Windows PowerShell (x86)'). Open the normal 64-bit 'Windows PowerShell' as Administrator and run the script again."
+}
+
+# The package must not live inside the install folder (or vice versa): the file copy mirrors
+# the package into the install folder and would delete the package itself.
+$pkgDir  = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
+$instDir = [IO.Path]::GetFullPath($InstallPath).TrimEnd('\')
+if ($pkgDir -ieq $instDir -or
+    $pkgDir.StartsWith($instDir + '\', [StringComparison]::OrdinalIgnoreCase) -or
+    $instDir.StartsWith($pkgDir + '\', [StringComparison]::OrdinalIgnoreCase)) {
+    throw "The package is in '$pkgDir', which overlaps the install folder '$instDir'. " +
+          "Extract the package somewhere separate (for example C:\Deploy\$(Split-Path $pkgDir -Leaf)) and run Install-IIS.ps1 from there."
 }
 
 if (-not (Test-Path (Join-Path $SourcePath "LiveDashboardMultiTab.dll"))) {
@@ -125,12 +182,26 @@ if (-not (Get-Service W3SVC -ErrorAction SilentlyContinue)) {
 }
 Write-Ok "IIS is installed"
 
-$ancm = Join-Path $env:ProgramFiles "IIS\Asp.Net Core Module\V2\aspnetcorev2.dll"
-if (-not (Test-Path $ancm)) {
+# Look in the 64-bit Program Files folder, then ask IIS itself whether the module is registered.
+$pf64 = $(if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles })
+$ancm = Join-Path $pf64 "IIS\Asp.Net Core Module\V2\aspnetcorev2.dll"
+$ancmFound = Test-Path $ancm
+$ancmRegistered = $false
+try {
+    Import-Module WebAdministration -ErrorAction Stop
+    $ancmRegistered = [bool](Get-WebGlobalModule -Name AspNetCoreModuleV2 -ErrorAction SilentlyContinue)
+} catch { }
+if (-not $ancmFound -and -not $ancmRegistered) {
     throw "The ASP.NET Core Module is missing. Install the ASP.NET Core 8 Hosting Bundle " +
-          "(https://dotnet.microsoft.com/download/dotnet/8.0), then run 'iisreset' and this script again."
+          "(winget install --id Microsoft.DotNet.HostingBundle.8 --exact, or https://dotnet.microsoft.com/download/dotnet/8.0), " +
+          "then run 'iisreset' and this script again. If it's already installed, IIS was probably added afterwards: " +
+          "run the Hosting Bundle installer again and choose Repair."
 }
-$runtimes = Join-Path $env:ProgramFiles "dotnet\shared\Microsoft.AspNetCore.App"
+if ($ancmFound -and -not $ancmRegistered) {
+    Write-Warn2 "The ASP.NET Core Module file exists but IIS doesn't list it. If the site fails with HTTP 500.19,"
+    Write-Warn2 "run the Hosting Bundle installer again, choose Repair, then run 'iisreset'."
+}
+$runtimes = Join-Path $pf64 "dotnet\shared\Microsoft.AspNetCore.App"
 if (-not (Get-ChildItem $runtimes -Directory -Filter "8.*" -ErrorAction SilentlyContinue)) {
     throw "ASP.NET Core 8 runtime not found in '$runtimes'. Install the ASP.NET Core 8 Hosting Bundle."
 }

@@ -43,6 +43,29 @@ Copy the zip to the server, extract it, open **PowerShell as Administrator** in 
 .\Install-IIS.ps1 -NewSite -SiteName LiveDashboards -Port 80 -HostHeader dashboards.contoso.local -ServiceAccount CONTOSO\svc-dashboards
 ```
 
+### Naming the installation
+
+Use `-Name` to give the installation its own name. It sets the web address, the app pool and the install folder in one go:
+
+```powershell
+.\Install-IIS.ps1 -Name OpsDashboards
+```
+
+| Name | Value |
+|---|---|
+| Web address | `http://server/opsdashboards/` (lower-case `-Name`) |
+| App pool | `OpsDashboards`, so the SQL login is `IIS APPPOOL\OpsDashboards` |
+| Install folder | `C:\inetpub\OpsDashboards` |
+| Site name (only with `-NewSite`) | `OpsDashboards` |
+
+- Any of these can still be set separately, and `-AppPath`, `-AppPoolName`, `-InstallPath` and `-SiteName` win over `-Name`. For example, `-Name OpsDashboards -AppPath ops` puts it at `/ops/`.
+- Names can use letters, digits, `-`, `_` and `.`, with no spaces.
+- **Several installations side by side:** each `-Name` gets its own folder, `appsettings.json` and app pool, so different teams can have their own dashboards on one server.
+- **Updating:** run the installer again with the **same `-Name`** (and the same other options). A different name creates a second installation rather than updating the first.
+- Without `-Name`, the names are `/dashboards/`, `LiveDashboards` and `C:\inetpub\LiveDashboards`, as before.
+
+The script prints the resolved names before it changes anything, so you can stop it (Ctrl+C) if one is wrong.
+
 The script:
 - checks the prerequisites and tells you exactly what's missing
 - creates an app pool (No Managed Code, always running, no idle shutdown, nightly recycle at 3:00 AM)
